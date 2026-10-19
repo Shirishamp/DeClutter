@@ -9,7 +9,7 @@ router.get('/google', (req, res) => {
   const oauth2Client = getGoogleOAuthClient();
 
   const scopes = [
-    'https://www.googleapis.com/auth/drive.metadata.readonly',
+    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/userinfo.email',
   ];
 
@@ -44,21 +44,34 @@ router.get('/google/callback', async (req, res) => {
       ? new Date(tokens.expiry_date)
       : null;
 
-    // Save the account + tokens to the database
-    await pool.query(
-      `INSERT INTO accounts (provider, account_label, email, access_token, refresh_token, token_expiry)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        'google_drive',
-        'Personal', // placeholder label for now — customizable in a later phase
-        userInfo.email,
-        tokens.access_token,
-        tokens.refresh_token || null,
-        expiryDate,
-      ]
+    const [existingAccounts] = await pool.query(
+      'SELECT id FROM accounts WHERE provider = ? AND email = ? ORDER BY id ASC LIMIT 1',
+      ['google_drive', userInfo.email]
     );
 
-    res.send(`Google Drive account connected successfully: ${userInfo.email}. You can close this tab.`);
+    if (existingAccounts.length > 0) {
+      await pool.query(
+        `UPDATE accounts
+         SET access_token = ?, refresh_token = COALESCE(?, refresh_token), token_expiry = ?
+         WHERE id = ?`,
+        [tokens.access_token, tokens.refresh_token || null, expiryDate, existingAccounts[0].id]
+      );
+      res.send(`Google Drive account reconnected successfully: ${userInfo.email}. You can close this tab.`);
+    } else {
+      await pool.query(
+        `INSERT INTO accounts (provider, account_label, email, access_token, refresh_token, token_expiry)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          'google_drive',
+          'Personal', // placeholder label for now — customizable in a later phase
+          userInfo.email,
+          tokens.access_token,
+          tokens.refresh_token || null,
+          expiryDate,
+        ]
+      );
+      res.send(`Google Drive account connected successfully: ${userInfo.email}. You can close this tab.`);
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ status: 'error', message: err.message });

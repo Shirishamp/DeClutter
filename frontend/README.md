@@ -1,5 +1,15 @@
 # Getting Started with Create React App
 
+## Moving files between Google Drive accounts
+
+Search for a file, choose **Move (keep original)** from its actions menu, and
+select a different connected account. The file is copied to the destination
+account's My Drive; the original remains unchanged. Folders are not supported.
+
+Moving files requires the Google Drive access scope. Existing connected
+accounts must be reconnected with **Connect Google Drive** and grant the updated
+permission before they can be used as a move source or destination.
+
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 ## Available Scripts

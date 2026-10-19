@@ -1,12 +1,307 @@
-.App {
-  text-align: center;
-  padding: 40px;
-  font-family: Arial, sans-serif;
+* {
+  box-sizing: border-box;
 }
 
-.App-header {
+body {
+  margin: 0;
+  background-color: #f5f6f8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  color: #1a1a1a;
+}
+
+.App {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+/* Header */
+.app-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.app-header h1 {
+  font-size: 1.8rem;
+  margin-bottom: 4px;
+}
+
+.status-line {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.connect-btn {
+  margin-top: 12px;
+}
+
+/* Generic section wrapper */
+.section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.section h2 {
+  font-size: 1.1rem;
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+/* Buttons */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  background-color: #2563eb;
+  color: #fff;
+  transition: background-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background-color: #1d4ed8;
+}
+
+button:disabled {
+  background-color: #a5b4d6;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background-color: #e5e7eb;
+  color: #1a1a1a;
+}
+
+button.secondary:hover:not(:disabled) {
+  background-color: #d1d5db;
+}
+
+button.danger {
+  background-color: #dc2626;
+}
+
+button.danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+/* Accounts table */
+.accounts-table-wrapper {
+  overflow-x: auto;
+}
+
+.accounts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.accounts-table th,
+.accounts-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+
+.accounts-table th {
+  color: #666;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.action-buttons {
   display: flex;
-  flex-direction: column;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.empty-state {
+  color: #888;
+  font-size: 0.9rem;
+}
+
+/* Search */
+.search-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.search-form input {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.results-count {
+  color: #666;
+  font-size: 0.85rem;
+  margin: 16px 0 8px;
+}
+
+.results-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.result-item {
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.result-item:last-child {
+  border-bottom: none;
+}
+
+.result-filename {
+  font-weight: 600;
+}
+
+.result-locations {
+  color: #555;
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.file-location {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.file-location:last-child {
+  border-bottom: none;
+}
+
+.file-location-heading {
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.file-actions {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.file-menu-trigger {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #555;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.file-menu-trigger:hover:not(:disabled) {
+  background: #f0f2f5;
+  color: #1a1a1a;
+}
+
+.file-action-menu {
+  position: absolute;
+  z-index: 2;
+  top: 38px;
+  right: 0;
+  min-width: 150px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.file-action-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  color: #1a1a1a;
+  text-align: left;
+}
+
+.file-action-menu button:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.move-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.move-form label {
+  font-weight: 600;
+}
+
+.move-form select {
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.move-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Responsive: small screens */
+@media (max-width: 600px) {
+  .App {
+    padding: 16px 10px 40px;
+  }
+
+  .app-header h1 {
+    font-size: 1.4rem;
+  }
+
+  .section {
+    padding: 14px;
+  }
+
+  .accounts-table th,
+  .accounts-table td {
+    padding: 8px;
+    font-size: 0.8rem;
+  }
+
+  .search-form {
+    flex-direction: column;
+  }
+
+  .search-form input,
+  .search-form button {
+    width: 100%;
+  }
+
+  .move-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .move-form select,
+  .move-form-actions button {
+    width: 100%;
+  }
+
+  .move-form-actions {
+    flex-direction: column;
+  }
 }

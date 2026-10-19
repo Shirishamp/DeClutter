@@ -70,6 +70,74 @@ async function fetchDriveFiles(account) {
 }
 
 /**
+ * Copies a file into another connected account without changing the original.
+ * The temporary share lets the destination account copy a file it does not own.
+ */
+async function copyDriveFile(sourceAccount, destinationAccount, fileId) {
+  const sourceAuth = await getAuthClientForAccount(sourceAccount);
+  const destinationAuth = await getAuthClientForAccount(destinationAccount);
+  const sourceDrive = google.drive({ version: 'v3', auth: sourceAuth });
+  const destinationDrive = google.drive({ version: 'v3', auth: destinationAuth });
+
+  const { data: sourceFile } = await sourceDrive.files.get({
+    fileId,
+    fields: 'id, name, mimeType, size, modifiedTime, parents',
+    supportsAllDrives: true,
+  });
+
+  if (sourceFile.mimeType === 'application/vnd.google-apps.folder') {
+    const error = new Error('Moving folders between accounts is not supported');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let permissionId;
+  let copiedFile;
+
+  try {
+    const { data: permission } = await sourceDrive.permissions.create({
+      fileId,
+      sendNotificationEmail: false,
+      requestBody: {
+        type: 'user',
+        role: 'writer',
+        emailAddress: destinationAccount.email,
+      },
+      fields: 'id',
+      supportsAllDrives: true,
+    });
+    permissionId = permission.id;
+
+    const { data } = await destinationDrive.files.copy({
+      fileId,
+      requestBody: { name: sourceFile.name, parents: ['root'] },
+      fields: 'id, name, mimeType, size, modifiedTime, parents',
+      supportsAllDrives: true,
+    });
+    copiedFile = data;
+  } catch (error) {
+    if (permissionId) {
+      try {
+        await sourceDrive.permissions.delete({ fileId, permissionId, supportsAllDrives: true });
+      } catch (cleanupError) {
+        console.error('Failed to remove temporary Drive permission', cleanupError);
+      }
+    }
+    throw error;
+  }
+
+  let permissionCleanupError = null;
+  try {
+    await sourceDrive.permissions.delete({ fileId, permissionId, supportsAllDrives: true });
+  } catch (error) {
+    permissionCleanupError = error;
+    console.error('Failed to remove temporary Drive permission', error);
+  }
+
+  return { sourceFile, copiedFile, permissionCleanupError };
+}
+
+/**
  * Resolves the immediate parent folder's name (not a full nested path).
  * Returns "My Drive" if the file has no parent (i.e. it's at the root).
  */
@@ -89,4 +157,4 @@ async function resolveFolderName(drive, parents, cache) {
   }
 }
 
-module.exports = { fetchDriveFiles };
+module.exports = { fetchDriveFiles, copyDriveFile };
