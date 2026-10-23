@@ -1,10 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
-const { fetchDriveFiles, copyDriveFile } = require('../services/googleDrive.service');
+const {
+  fetchDriveFiles,
+  copyDriveFile,
+  trashDriveFile,
+  getDriveFileThumbnail,
+} = require('../services/googleDrive.service');
 
 function isPositiveInteger(value) {
   return /^\d+$/.test(String(value)) && Number(value) > 0;
+}
+
+function isInvalidGrant(error) {
+  return (
+    error.code === 'invalid_grant' ||
+    (error.response && error.response.data && error.response.data.error === 'invalid_grant') ||
+    /invalid_grant/i.test(error.message || '')
+  );
 }
 
 async function saveCopiedFile(accountId, file) {
@@ -72,8 +85,14 @@ router.post('/sync/:accountId', async (req, res) => {
 
     res.json({ status: 'ok', message: 'Sync complete', filesSynced: files.length });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: 'error', message: err.message });
+    const invalidGrant = isInvalidGrant(err);
+    console.error('Google Drive file sync failed:', err.message);
+    res.status(invalidGrant ? 401 : 500).json({
+      status: 'error',
+      message: invalidGrant
+        ? 'Google rejected a saved refresh token. Reconnect the affected Google Drive account and try again.'
+        : err.message,
+    });
   }
 });
 
@@ -152,22 +171,153 @@ router.post('/move', async (req, res) => {
         : undefined,
     });
   } catch (err) {
-    console.error(err);
+    const invalidGrant = isInvalidGrant(err);
+    console.error('Google Drive file copy failed:', err.message);
     const providerStatus = Number(err.statusCode || (err.response && err.response.status) || err.code);
     const statusCode =
-      Number.isInteger(providerStatus) && providerStatus >= 400 && providerStatus <= 599
-        ? providerStatus
-        : 500;
-    const reauthorizationHint =
-      statusCode === 401 || statusCode === 403
-        ? ' Reconnect both Google Drive accounts and approve Drive access. The source account must also allow sharing and copying this file.'
-        : '';
-    res.status(statusCode).json({ status: 'error', message: `${err.message}${reauthorizationHint}` });
+      invalidGrant
+        ? 401
+        : Number.isInteger(providerStatus) && providerStatus >= 400 && providerStatus <= 599
+          ? providerStatus
+          : 500;
+    const message = invalidGrant
+      ? 'Google rejected a saved refresh token. Reconnect the affected Google Drive account and try again.'
+      : statusCode === 401 || statusCode === 403
+        ? `${err.message} Reconnect both Google Drive accounts and approve Drive access. The source account must also allow sharing and copying this file.`
+        : err.message;
+    res.status(statusCode).json({ status: 'error', message });
+  }
+});
+
+// POST /api/files/trash
+// Moves an indexed file to its Google Drive owner's trash.
+router.post('/trash', async (req, res) => {
+  const { sourceAccountId, fileId } = req.body;
+
+  if (!isPositiveInteger(sourceAccountId) || !fileId || typeof fileId !== 'string') {
+    return res.status(400).json({
+      status: 'error',
+      message: 'sourceAccountId and fileId are required',
+    });
+  }
+
+  try {
+    const [accounts] = await pool.query(
+      `SELECT id, provider, email, access_token, refresh_token, token_expiry
+       FROM accounts
+       WHERE id = ?`,
+      [sourceAccountId]
+    );
+    const sourceAccount = accounts[0];
+
+    if (!sourceAccount) {
+      return res.status(404).json({ status: 'error', message: 'Source account not found' });
+    }
+
+    if (sourceAccount.provider !== 'google_drive') {
+      return res.status(400).json({ status: 'error', message: 'The source account must be Google Drive' });
+    }
+
+    const [files] = await pool.query(
+      'SELECT file_id FROM files WHERE account_id = ? AND file_id = ?',
+      [sourceAccountId, fileId]
+    );
+    if (files.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'File not found in the source account' });
+    }
+
+    const trashedFile = await trashDriveFile(sourceAccount, fileId);
+
+    try {
+      await pool.query('DELETE FROM files WHERE account_id = ? AND file_id = ?', [sourceAccountId, fileId]);
+    } catch (error) {
+      console.error('File moved to Drive trash, but failed to remove its index entry', error);
+      return res.status(500).json({
+        status: 'partial',
+        message: 'The file was moved to Google Drive trash, but its search index could not be updated.',
+        fileName: trashedFile.name,
+      });
+    }
+
+    return res.json({
+      status: 'ok',
+      message: 'File moved to Google Drive trash. You can recover it before it is permanently deleted after 30 days.',
+      fileName: trashedFile.name,
+    });
+  } catch (err) {
+    const invalidGrant = isInvalidGrant(err);
+    console.error('Google Drive trash operation failed:', err.message);
+    const providerStatus = Number(err.statusCode || (err.response && err.response.status) || err.code);
+    const statusCode =
+      invalidGrant
+        ? 401
+        : Number.isInteger(providerStatus) && providerStatus >= 400 && providerStatus <= 599
+          ? providerStatus
+          : 500;
+    const message = invalidGrant
+      ? 'Google rejected a saved refresh token. Reconnect the affected Google Drive account and try again.'
+      : statusCode === 403
+        ? `${err.message} The source account may not have permission to move this file to trash.`
+        : err.message;
+    return res.status(statusCode).json({ status: 'error', message });
   }
 });
 
 // GET /api/files/:accountId
 // Lists stored metadata for a given account (for verification / testing)
+router.get('/:accountId/:fileId/thumbnail', async (req, res) => {
+  const { accountId, fileId } = req.params;
+
+  if (!isPositiveInteger(accountId) || !fileId) {
+    return res.status(400).json({ status: 'error', message: 'A valid accountId and fileId are required' });
+  }
+
+  try {
+    const [accounts] = await pool.query(
+      `SELECT id, access_token, refresh_token, token_expiry
+       FROM accounts
+       WHERE id = ?`,
+      [accountId]
+    );
+    if (accounts.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'Account not found' });
+    }
+
+    const [files] = await pool.query(
+      'SELECT file_id FROM files WHERE account_id = ? AND file_id = ?',
+      [accountId, fileId]
+    );
+    if (files.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'File not found in the source account' });
+    }
+
+    const thumbnail = await getDriveFileThumbnail(accounts[0], fileId);
+    if (!thumbnail) {
+      return res.status(404).json({ status: 'error', message: 'No thumbnail is available for this file' });
+    }
+
+    res.set('Cache-Control', 'private, max-age=3600');
+    if (thumbnail.headers['content-type']) {
+      res.type(thumbnail.headers['content-type']);
+    }
+    thumbnail.data.on('error', (error) => {
+      console.error('Google Drive thumbnail stream failed:', error.message);
+      if (!res.headersSent) res.status(502);
+      res.end();
+    });
+    return thumbnail.data.pipe(res);
+  } catch (err) {
+    const invalidGrant = isInvalidGrant(err);
+    console.error('Google Drive thumbnail fetch failed:', err.message);
+    return res.status(invalidGrant ? 401 : 502).json({
+      status: 'error',
+      message: invalidGrant
+        ? 'Google rejected a saved refresh token. Reconnect the affected Google Drive account and try again.'
+        : 'Could not load this Google Drive thumbnail.',
+    });
+  }
+});
+
 router.get('/:accountId', async (req, res) => {
   const { accountId } = req.params;
 

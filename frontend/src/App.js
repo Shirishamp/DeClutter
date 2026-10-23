@@ -6,11 +6,16 @@ function App() {
   const [accounts, setAccounts] = useState([]);
   const [syncingId, setSyncingId] = useState(null);
   const [movingFileKey, setMovingFileKey] = useState(null);
+  const [trashingFileKey, setTrashingFileKey] = useState(null);
   const [openFileMenuKey, setOpenFileMenuKey] = useState(null);
   const [activeMoveKey, setActiveMoveKey] = useState(null);
+  const [pendingTrash, setPendingTrash] = useState(null);
   const [moveTargets, setMoveTargets] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [mediaView, setMediaView] = useState(false);
+  const [mediaSort, setMediaSort] = useState('date');
+  const [loadingMedia, setLoadingMedia] = useState(false);
 
   useEffect(() => {
     fetch('http://localhost:5000/api/health')
@@ -89,9 +94,33 @@ function App() {
       const res = await fetch(`http://localhost:5000/api/search?q=${encodeURIComponent(searchTerm)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Search failed.');
+      setMediaView(false);
       setSearchResults(data.results || []);
     } catch (err) {
       alert(`Search failed: ${err.message}`);
+    }
+  };
+
+  const handleBrowseMedia = async () => {
+    setLoadingMedia(true);
+    try {
+      const res = await fetch('http://localhost:5000/api/search?media=true');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Could not load photos and videos.');
+      setMediaView(true);
+      setSearchResults(data.results || []);
+    } catch (err) {
+      alert(`Could not load photos and videos: ${err.message}`);
+    } finally {
+      setLoadingMedia(false);
+    }
+  };
+
+  const refreshCurrentResults = async () => {
+    if (mediaView) {
+      await handleBrowseMedia();
+    } else if (searchTerm.trim()) {
+      await handleSearch();
     }
   };
 
@@ -130,7 +159,7 @@ function App() {
 
       alert(data.warning ? `${data.message} ${data.warning}` : data.message);
       setActiveMoveKey(null);
-      await handleSearch();
+      await refreshCurrentResults();
       loadAccounts();
     } catch (err) {
       alert(`Move failed: ${err.message}`);
@@ -143,6 +172,86 @@ function App() {
     const driveUrl = `https://drive.google.com/file/d/${fileId}/view`;
     window.open(driveUrl, '_blank', 'noopener,noreferrer');
     setOpenFileMenuKey(null);
+  };
+
+  const handleTrashFile = async () => {
+    if (!pendingTrash) return;
+
+    const { fileKey, source } = pendingTrash;
+    setTrashingFileKey(fileKey);
+    try {
+      const res = await fetch('http://localhost:5000/api/files/trash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceAccountId: source.accountId,
+          fileId: source.fileId,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.status === 'partial') {
+        alert(`${data.message} Refresh the search results to update the file index.`);
+        setPendingTrash(null);
+        await refreshCurrentResults();
+        return;
+      }
+      if (!res.ok || data.status !== 'ok') {
+        throw new Error(data.message || 'Could not move the file to trash.');
+      }
+
+      setPendingTrash(null);
+      await refreshCurrentResults();
+      loadAccounts();
+    } catch (err) {
+      alert(`Could not move file to trash: ${err.message}`);
+    } finally {
+      setTrashingFileKey(null);
+    }
+  };
+
+  const displayResults = mediaView && searchResults
+    ? searchResults
+        .flatMap((result) =>
+          result.availableIn.map((source) => ({
+            fileName: result.fileName,
+            availableIn: [source],
+          }))
+        )
+        .sort((a, b) => {
+          const sourceA = a.availableIn[0];
+          const sourceB = b.availableIn[0];
+          let comparison = 0;
+
+          if (mediaSort === 'size') {
+            const sizeA = sourceA.fileSize === null ? -1 : sourceA.fileSize;
+            const sizeB = sourceB.fileSize === null ? -1 : sourceB.fileSize;
+            comparison = sizeB - sizeA;
+          } else if (mediaSort === 'type') {
+            comparison = (sourceA.fileType || '').localeCompare(sourceB.fileType || '');
+          } else {
+            comparison =
+              (sourceB.modifiedDate ? new Date(sourceB.modifiedDate).getTime() : 0) -
+              (sourceA.modifiedDate ? new Date(sourceA.modifiedDate).getTime() : 0);
+          }
+
+          return comparison || a.fileName.localeCompare(b.fileName);
+        })
+    : searchResults;
+
+  const formatFileSize = (size) => {
+    if (size === null || size === undefined) return 'Size unavailable';
+    const bytes = Number(size);
+    if (!Number.isFinite(bytes)) return 'Size unavailable';
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+    return `${value.toFixed(1)} ${units[unitIndex]}`;
   };
 
   return (
@@ -210,12 +319,77 @@ function App() {
           <button type="submit">Search</button>
         </form>
 
+        <div className="media-browser-controls">
+          <button
+            type="button"
+            onClick={handleBrowseMedia}
+            disabled={loadingMedia}
+          >
+            {loadingMedia
+              ? 'Loading media...'
+              : mediaView
+                ? 'Refresh photos & videos'
+                : 'View photos & videos from all accounts'}
+          </button>
+          {mediaView && (
+            <>
+              <label className="media-sort">
+                Sort by
+                <select value={mediaSort} onChange={(event) => setMediaSort(event.target.value)}>
+                  <option value="date">Date (newest first)</option>
+                  <option value="size">Size (largest first)</option>
+                  <option value="type">Type (A–Z)</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setMediaView(false);
+                  setSearchResults(null);
+                }}
+              >
+                Back to file search
+              </button>
+            </>
+          )}
+        </div>
+
         {searchResults && (
           <>
-            <p className="results-count">{searchResults.length} result(s) found</p>
-            <ul className="results-list">
-              {searchResults.map((result, idx) => (
-                <li key={idx} className="result-item">
+            <p className="results-count">
+              {mediaView
+                ? `${displayResults.length} photo(s) and video(s) across all connected accounts`
+                : `${searchResults.length} result(s) found`}
+            </p>
+            <ul className={mediaView ? 'results-list media-results' : 'results-list'}>
+              {displayResults.map((result, idx) => (
+                <li
+                  key={mediaView ? `${result.availableIn[0].accountId}:${result.availableIn[0].fileId}` : idx}
+                  className={mediaView ? 'result-item media-result-item' : 'result-item'}
+                >
+                  {mediaView && (
+                    <div className="media-preview">
+                      <div className="media-preview-placeholder">
+                        {result.availableIn[0].fileType.startsWith('video/')
+                          ? 'Video preview unavailable'
+                          : 'Photo preview unavailable'}
+                      </div>
+                      <img
+                        src={`http://localhost:5000/api/files/${encodeURIComponent(
+                          result.availableIn[0].accountId
+                        )}/${encodeURIComponent(result.availableIn[0].fileId)}/thumbnail`}
+                        alt={`Preview of ${result.fileName}`}
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none';
+                        }}
+                      />
+                      {result.availableIn[0].fileType.startsWith('video/') && (
+                        <span className="video-preview-badge" aria-label="Video">▶</span>
+                      )}
+                    </div>
+                  )}
                   <div className="result-filename">{result.fileName}</div>
                   {result.availableIn.map((source) => {
                     const fileKey = `${source.accountId}:${source.fileId}`;
@@ -226,8 +400,21 @@ function App() {
                     return (
                       <div className="file-location" key={fileKey}>
                         <div className="file-location-heading">
-                          <div className="result-locations">
-                            Available in: {source.provider} ({source.accountLabel})
+                          <div>
+                            <div className="result-locations">
+                              Available in: {source.provider} ({source.accountLabel})
+                            </div>
+                            {mediaView && (
+                              <div className="media-metadata">
+                                <span>{source.fileType}</span>
+                                <span>{formatFileSize(source.fileSize)}</span>
+                                <span>
+                                  {source.modifiedDate
+                                    ? new Date(source.modifiedDate).toLocaleDateString()
+                                    : 'Date unavailable'}
+                                </span>
+                              </div>
+                            )}
                           </div>
                           <div className="file-actions">
                             <button
@@ -261,6 +448,16 @@ function App() {
                                   disabled={destinations.length === 0}
                                 >
                                   ↪ Move (keep original)
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setOpenFileMenuKey(null);
+                                    setPendingTrash({ fileKey, fileName: result.fileName, source });
+                                  }}
+                                >
+                                  Move to trash
                                 </button>
                               </div>
                             )}
@@ -318,6 +515,40 @@ function App() {
           </>
         )}
       </section>
+      {pendingTrash && (
+        <div className="confirmation-backdrop">
+          <div
+            className="confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="trash-confirmation-title"
+            aria-describedby="trash-confirmation-message"
+          >
+            <h2 id="trash-confirmation-title">Move file to trash?</h2>
+            <p id="trash-confirmation-message">
+              Are you sure you want to move “{pendingTrash.fileName}” to trash? You can recover it before 30 days.
+            </p>
+            <div className="confirmation-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setPendingTrash(null)}
+                disabled={trashingFileKey === pendingTrash.fileKey}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={handleTrashFile}
+                disabled={trashingFileKey === pendingTrash.fileKey}
+              >
+                {trashingFileKey === pendingTrash.fileKey ? 'Moving...' : 'Yes, move to trash'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

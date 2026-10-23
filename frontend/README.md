@@ -10,6 +10,16 @@ Moving files requires the Google Drive access scope. Existing connected
 accounts must be reconnected with **Connect Google Drive** and grant the updated
 permission before they can be used as a move source or destination.
 
+Files can also be moved to the source account's Google Drive Trash from the
+file actions menu. The app asks for confirmation first; trashed files can
+usually be restored from Drive Trash before Google permanently deletes them
+after 30 days.
+
+Use **View photos & videos from all accounts** to browse synced images and
+videos in a larger thumbnail grid. The media view can be sorted by newest date,
+largest size, or file type; each item retains the same view, copy, and trash
+actions as other search results.
+
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 ## Available Scripts
